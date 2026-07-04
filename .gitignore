@@ -1,0 +1,27 @@
+# Visual Studio & IDE User State Files
+.vs/
+*.user
+*.slnLaunch.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.vsidx
+CopilotIndices/
+
+# .NET Build Output & Intermediate Cache Files (NEVER commit these)
+bin/
+obj/
+project.lock.json
+project.fragment.lock.json
+*.dll
+*.exe
+*.pdb
+*.cache
+*.upToDateCheck.txt
+
+# OS Generated Temporary Files
+.DS_Store
+Thumbs.db
+
+# MCP / Testing Tool Output
+.mcp-output/

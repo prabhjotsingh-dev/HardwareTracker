@@ -1,0 +1,6 @@
+@HardwareTracker.Api_HostAddress = http://localhost:5181
+
+GET {{HardwareTracker.Api_HostAddress}}/api/hardware/summary
+Accept: application/json
+
+###
