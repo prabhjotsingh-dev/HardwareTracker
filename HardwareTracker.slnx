@@ -1,6 +1,5 @@
 <Solution>
   <Project Path="HardwareTracker.Api/HardwareTracker.Api.csproj" />
   <Project Path="HardwareTracker.Shared/HardwareTracker.Shared.csproj" Id="48666c3d-66d3-46a4-ad95-58907a769640" />
-  <Project Path="HardwareTracker.Web/HardwareTracker.Web.csproj" />
   <Project Path="HardwareTracker.Host/HardwareTracker.Host.csproj" />
 </Solution>

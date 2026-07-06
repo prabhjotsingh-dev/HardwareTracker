@@ -8,7 +8,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\HardwareTracker.Api\HardwareTracker.Api.csproj" />
-    <ProjectReference Include="..\HardwareTracker.Web\HardwareTracker.Web.csproj" />
   </ItemGroup>
 
 </Project>

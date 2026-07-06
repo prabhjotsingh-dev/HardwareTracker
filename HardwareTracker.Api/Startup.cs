@@ -41,8 +41,8 @@ public static class Startup
             app.MapOpenApi();
         }
 
-        app.UseHttpsRedirection();
         app.UseCors();
+        app.UseHttpsRedirection();
         app.UseAuthorization();
         app.MapControllers();
 
