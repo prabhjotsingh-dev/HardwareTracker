@@ -1,14 +1,25 @@
 using System.Diagnostics;
+using System.Net.NetworkInformation;
+using System.Linq;
 
 var apiArgs = new[] { "--urls", "http://localhost:5181;https://localhost:7236" };
-var uiArgs = new[] { "--urls", "http://localhost:5113" };
 
 using var apiApp = HardwareTracker.Api.Startup.CreateApp(apiArgs);
+FreePort(3000);
+using var uiProcess = StartNextJs();
+
+var lifetime = new HostLifetime(uiProcess);
+Console.CancelKeyPress += (_, e) =>
+{
+    e.Cancel = true;
+    lifetime.Shutdown();
+};
+
+AppDomain.CurrentDomain.ProcessExit += (_, _) => lifetime.Dispose();
 
 BuildUI();
-using var uiApp = CreateUiApp(uiArgs);
 
-await Task.WhenAll(apiApp.RunAsync(), uiApp.RunAsync());
+await Task.WhenAll(apiApp.RunAsync(), lifetime.WaitForExitAsync());
 
 static void BuildUI()
 {
@@ -19,8 +30,8 @@ static void BuildUI()
         return;
     }
 
-    var dist = Path.Combine(uiDir, "dist", "index.html");
-    if (File.Exists(dist))
+    var outDir = Path.Combine(uiDir, ".next");
+    if (Directory.Exists(outDir))
         return;
 
     Console.WriteLine("Building UI...");
@@ -39,30 +50,38 @@ static void BuildUI()
         Console.Error.WriteLine("UI build failed.");
 }
 
-static WebApplication CreateUiApp(string[] args)
+static Process StartNextJs()
 {
     var uiDir = ResolveProjectPath("HardwareTracker.UI");
     if (uiDir is null)
     {
-        Console.WriteLine("UI project not found. Cannot serve UI.");
+        Console.WriteLine("UI project not found. Cannot start Next.js.");
         Environment.Exit(1);
     }
 
-    var webRoot = Path.Combine(uiDir, "dist");
-    Directory.CreateDirectory(webRoot);
-
-    var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+    Console.WriteLine("Starting Next.js server...");
+    var psi = new ProcessStartInfo("cmd.exe", $"/c cd /d \"{uiDir}\" && npx next start -p 3000")
     {
-        Args = args,
-        WebRootPath = webRoot
-    });
+        UseShellExecute = false,
+        RedirectStandardOutput = true,
+        RedirectStandardError = true
+    };
+    var process = Process.Start(psi)!;
 
-    var app = builder.Build();
-    app.UseDefaultFiles();
-    app.UseStaticFiles();
-    app.MapFallbackToFile("index.html");
+    process.OutputDataReceived += (_, e) =>
+    {
+        if (!string.IsNullOrEmpty(e.Data))
+            Console.WriteLine($"[Next.js] {e.Data}");
+    };
+    process.ErrorDataReceived += (_, e) =>
+    {
+        if (!string.IsNullOrEmpty(e.Data))
+            Console.Error.WriteLine($"[Next.js] {e.Data}");
+    };
+    process.BeginOutputReadLine();
+    process.BeginErrorReadLine();
 
-    return app;
+    return process;
 }
 
 static string? ResolveProjectPath(string projectName)
@@ -75,4 +94,92 @@ static string? ResolveProjectPath(string projectName)
         dir = Directory.GetParent(dir)?.FullName;
     }
     return null;
+}
+
+static void FreePort(int port)
+{
+    var ipProps = IPGlobalProperties.GetIPGlobalProperties();
+    var listeners = ipProps.GetActiveTcpListeners()
+        .Concat(ipProps.GetActiveTcpConnections().Select(c => c.LocalEndPoint))
+        .Where(e => e.Port == port)
+        .ToList();
+
+    foreach (var ep in listeners)
+    {
+        var pid = GetProcessIdOnPort(port);
+        if (pid.HasValue)
+        {
+            try
+            {
+                var proc = Process.GetProcessById(pid.Value);
+                Console.WriteLine($"Killing process {proc.ProcessName} (PID {pid.Value}) on port {port}...");
+                proc.Kill(entireProcessTree: true);
+                proc.WaitForExit(3000);
+            }
+            catch { }
+        }
+    }
+}
+
+static int? GetProcessIdOnPort(int port)
+{
+    try
+    {
+        var psi = new ProcessStartInfo("netstat", "-ano")
+        {
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            CreateNoWindow = true
+        };
+        using var p = Process.Start(psi)!;
+        var output = p.StandardOutput.ReadToEnd();
+        p.WaitForExit();
+
+        foreach (var line in output.Split('\n'))
+        {
+            if (line.Contains($"LISTENING") && line.Contains($":{port} "))
+            {
+                var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length >= 5 && int.TryParse(parts[^1], out var pid))
+                    return pid;
+            }
+        }
+    }
+    catch { }
+    return null;
+}
+
+sealed class HostLifetime(Process _uiProcess) : IDisposable
+{
+    private readonly CancellationTokenSource _cts = new();
+
+    public void Shutdown() => Dispose();
+
+    public async Task WaitForExitAsync()
+    {
+        try
+        {
+            await Task.Delay(Timeout.Infinite, _cts.Token);
+        }
+        catch (OperationCanceledException) { }
+    }
+
+    public void Dispose()
+    {
+        try
+        {
+            if (!_uiProcess.HasExited)
+            {
+                _uiProcess.Kill(entireProcessTree: true);
+                _uiProcess.WaitForExit(5000);
+            }
+        }
+        catch { }
+
+        _uiProcess.Dispose();
+        _cts.Cancel();
+        _cts.Dispose();
+
+        Console.WriteLine("Shutdown complete.");
+    }
 }

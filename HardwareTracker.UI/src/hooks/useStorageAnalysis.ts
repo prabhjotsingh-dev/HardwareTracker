@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
-import { fetchStorageAnalysis } from '../services/api'
-import type { DriveStorageAnalysisDto } from '../types'
+import { fetchStorageAnalysis } from '@/services/api'
+import type { DriveStorageAnalysisDto } from '@/types'
 
 export function useStorageAnalysis() {
   const [data, setData] = useState<DriveStorageAnalysisDto[] | null>(null)

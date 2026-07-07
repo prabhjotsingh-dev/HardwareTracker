@@ -1,6 +1,12 @@
-import GlassCard from '../components/GlassCard'
+import type { Metadata } from 'next'
+import GlassCard from '@/components/GlassCard'
 
-export default function Privacy() {
+export const metadata: Metadata = {
+  title: 'Privacy Policy - HardwareTracker',
+  description: 'HardwareTracker diagnostics telemetry and privacy disclosure',
+}
+
+export default function PrivacyPage() {
   return (
     <div>
       <div className="mt-10 mb-10">

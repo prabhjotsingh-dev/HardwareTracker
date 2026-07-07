@@ -1,5 +1,7 @@
-import { useStorageAnalysis } from '../hooks/useStorageAnalysis'
-import GlassCard from '../components/GlassCard'
+'use client'
+
+import { useStorageAnalysis } from '@/hooks/useStorageAnalysis'
+import GlassCard from '@/components/GlassCard'
 
 const catColorMap: Record<string, string> = {
   'cat-system': 'bg-gray-400',
@@ -14,7 +16,7 @@ const catColorMap: Record<string, string> = {
   'cat-other': 'bg-gray-500',
 }
 
-export default function StorageAnalysis() {
+export default function StorageAnalysisPage() {
   const { data, error, loading, refetch } = useStorageAnalysis()
 
   return (
@@ -83,7 +85,7 @@ export default function StorageAnalysis() {
                       <span className="font-mono-jet mr-2 rounded-md border border-white/15 bg-dark/50 px-2 py-0.5 text-sm text-cyan-400">
                         {analysis.driveName}
                       </span>
-                      {analysis.totalUsedGb} GB Used · {analysis.freeSpaceGb} GB Free (of {analysis.totalSizeGb} GB)
+                      {analysis.totalUsedGb} GB Used &middot; {analysis.freeSpaceGb} GB Free (of {analysis.totalSizeGb} GB)
                     </h4>
                     <span className="font-mono-jet text-xs text-gray-400">
                       {analysis.categories.length} categories
