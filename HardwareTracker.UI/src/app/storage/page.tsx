@@ -1,10 +1,20 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useStorageAnalysis } from "@/hooks/useStorageAnalysis";
+import { fetchDrives } from "@/services/api";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@/components/ui/dropdown-menu";
+import { ChevronDown } from "lucide-react";
+import { Spinner } from "@/components/ui/spinner";
 
 const catColorMap: Record<string, string> = {
   "cat-system": "bg-gray-400",
@@ -22,11 +32,12 @@ const catColorMap: Record<string, string> = {
 export default function StorageAnalysisPage() {
   const searchParams = useSearchParams();
   const driveFilter = searchParams.get("drive");
-  const { data, error, loading, refetch } = useStorageAnalysis();
+  const { data, error, loading, refreshing, refetch } = useStorageAnalysis(driveFilter ?? undefined);
+  const [drives, setDrives] = useState<string[]>([]);
 
-  const filteredData = driveFilter && data
-    ? data.filter((a) => a.driveName === driveFilter)
-    : data;
+  useEffect(() => {
+    fetchDrives().then(setDrives).catch(() => {});
+  }, []);
 
   return (
     <div>
@@ -42,11 +53,27 @@ export default function StorageAnalysisPage() {
           </p>
         </div>
         <div className="flex items-center gap-3">
-          {driveFilter && (
-            <Button render={<Link href="/storage" />} variant="outline">
-              All Drives
-            </Button>
-          )}
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={<Button variant="outline" className="flex items-center gap-2" />}
+            >
+              {driveFilter || "All Drives"}
+              <ChevronDown className="h-4 w-4" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem render={<Link href="/storage" />}>
+                All Drives
+              </DropdownMenuItem>
+              {drives.map((d) => (
+                <DropdownMenuItem
+                  key={d}
+                  render={<Link href={`/storage?drive=${d}`} />}
+                >
+                  {d}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Button onClick={refetch} disabled={loading}>
             <svg
               width="18"
@@ -107,7 +134,7 @@ export default function StorageAnalysisPage() {
         </Card>
       )}
 
-      {!loading && filteredData && filteredData.length > 0 && (
+      {!loading && data && data.length > 0 && (
         <div className="grid gap-6">
           <Card>
             <CardContent>
@@ -120,7 +147,7 @@ export default function StorageAnalysisPage() {
                 </h3>
               </div>
 
-              {filteredData.map((analysis, idx) => (
+              {data.map((analysis, idx) => (
                 <div key={analysis.driveName}>
                   <div className="mb-4 rounded-xl bg-muted/30 p-4">
                     <div className="mb-2 flex items-center justify-between">
@@ -128,9 +155,10 @@ export default function StorageAnalysisPage() {
                         <span className="font-mono-jet mr-2 rounded-md border border-border bg-dark/50 px-2 py-0.5 text-sm text-cyan-400">
                           {analysis.driveName}
                         </span>
-                        {analysis.totalUsedGb} GB Used &middot;{" "}
-                        {analysis.freeSpaceGb} GB Free (of{" "}
-                        {analysis.totalSizeGb} GB)
+                        {analysis.totalUsed} ({analysis.usedPercentage}%) Used &middot;{" "}
+                        {analysis.freeSpace} ({analysis.freePercentage}%) Free (of{" "}
+                        {analysis.totalSize})
+                        {refreshing && <Spinner className="ml-2 text-cyan-400" />}
                       </h4>
                       <span className="font-mono-jet text-xs text-muted-foreground">
                         {analysis.categories.length} categories
@@ -140,12 +168,12 @@ export default function StorageAnalysisPage() {
                     {analysis.categories.length > 0 && (
                       <>
                         <div className="mb-3 flex h-6 overflow-hidden rounded-lg bg-muted">
-                          {analysis.categories.map((cat) => (
+                          {[...analysis.categories,{categoryName: "Free", colorClass: "bg-white-500", totalSize: analysis.freeSpace, percentageOfUsed: analysis.freePercentage }].map((cat) => (
                             <div
                               key={cat.categoryName}
                               className={`min-w-[2px] transition-all duration-500 ${catColorMap[cat.colorClass] || "bg-gray-500"}`}
                               style={{ width: `${cat.percentageOfUsed}%` }}
-                              title={`${cat.categoryName}: ${cat.totalSizeGb} GB (${cat.percentageOfUsed}%)`}
+                              title={`${cat.categoryName}: ${cat.totalSize} (${cat.percentageOfUsed}%)`}
                             />
                           ))}
                         </div>
@@ -163,7 +191,7 @@ export default function StorageAnalysisPage() {
                                 {cat.categoryName}
                               </span>
                               <span className="font-mono-jet min-w-[70px] text-right font-semibold text-foreground">
-                                {cat.totalSizeGb} GB
+                                {cat.totalSize}
                               </span>
                               <span className="font-mono-jet min-w-[50px] text-right text-muted-foreground">
                                 {cat.percentageOfUsed}%
@@ -188,7 +216,7 @@ export default function StorageAnalysisPage() {
                       </p>
                     )}
                   </div>
-                  {idx < filteredData.length - 1 && (
+                  {idx < data.length - 1 && (
                     <hr className="my-4 border-border" />
                   )}
                 </div>
@@ -210,7 +238,7 @@ export default function StorageAnalysisPage() {
         </Card>
       )}
 
-      {!loading && filteredData && filteredData.length === 0 && driveFilter && data && data.length > 0 && (
+      {!loading && data && data.length === 0 && driveFilter && (
         <Card>
           <CardContent>
             <div className="py-8 text-center">

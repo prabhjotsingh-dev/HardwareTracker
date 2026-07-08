@@ -7,7 +7,6 @@ import { ModeToggle } from '@/components/ModeToggle'
 const links = [
   { to: '/', label: 'Dashboard' },
   { to: '/storage', label: 'Storage Analysis' },
-  { to: '/privacy', label: 'Privacy' },
 ]
 
 export default function Navbar() {

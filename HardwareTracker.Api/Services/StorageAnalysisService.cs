@@ -14,6 +14,8 @@ public class StorageAnalysisService : IStorageAnalysisService
     private static DateTime _lastCacheTime = DateTime.MinValue;
     private static readonly object _cacheLock = new();
 
+    private static readonly ConcurrentDictionary<string, DriveCacheEntry> _driveCache = new();
+
     private static readonly EnumerationOptions _enumOptions = new()
     {
         IgnoreInaccessible = true,
@@ -28,8 +30,51 @@ public class StorageAnalysisService : IStorageAnalysisService
         _scanTimeout = TimeSpan.FromSeconds(configuration.GetValue("StorageAnalysis:ScanTimeoutSeconds", 45));
     }
 
-    public async Task<List<DriveStorageAnalysisDto>> GetStorageAnalysisAsync()
+    public async Task<List<DriveStorageAnalysisDto>> GetStorageAnalysisAsync(string? driveName = null)
     {
+        if (!string.IsNullOrWhiteSpace(driveName))
+        {
+            string key = driveName.TrimEnd('\\', '/');
+
+            if (_driveCache.TryGetValue(key, out var entry) &&
+                DateTime.UtcNow - entry.Time < _cacheDuration)
+            {
+                return [entry.Data];
+            }
+
+            var drive = DriveInfo.GetDrives()
+                .FirstOrDefault(d => d.IsReady && d.Name.TrimEnd('\\', '/')
+                    .Equals(key, StringComparison.OrdinalIgnoreCase));
+
+            if (drive == null)
+                return [];
+
+            using var cts = new CancellationTokenSource(_scanTimeout);
+            var token = cts.Token;
+
+            DriveStorageAnalysisDto? result = null;
+            try
+            {
+                result = await Task.Run(() => AnalyzeDrive(drive, token), token);
+            }
+            catch (OperationCanceledException)
+            {
+                _logger.LogWarning("Storage analysis timed out for drive {Drive}", drive.Name);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to analyze drive {Drive}", drive.Name);
+            }
+
+            if (result != null)
+            {
+                _driveCache[key] = new DriveCacheEntry(result, DateTime.UtcNow);
+                return [result];
+            }
+
+            return [];
+        }
+
         lock (_cacheLock)
         {
             if (_cachedResult != null && DateTime.UtcNow - _lastCacheTime < _cacheDuration)
@@ -38,8 +83,8 @@ public class StorageAnalysisService : IStorageAnalysisService
             }
         }
 
-        using var cts = new CancellationTokenSource(_scanTimeout);
-        var token = cts.Token;
+        using var cts2 = new CancellationTokenSource(_scanTimeout);
+        var token2 = cts2.Token;
 
         var fixedDrives = DriveInfo.GetDrives().Where(d => d.IsReady && d.DriveType == DriveType.Fixed).ToList();
 
@@ -47,7 +92,7 @@ public class StorageAnalysisService : IStorageAnalysisService
         {
             try
             {
-                return AnalyzeDrive(drive, token);
+                return AnalyzeDrive(drive, token2);
             }
             catch (OperationCanceledException)
             {
@@ -59,7 +104,7 @@ public class StorageAnalysisService : IStorageAnalysisService
                 _logger.LogWarning(ex, "Failed to analyze drive {Drive}", drive.Name);
                 return null;
             }
-        }, token));
+        }, token2));
 
         var results = (await Task.WhenAll(tasks))
             .Where(r => r != null)
@@ -71,6 +116,9 @@ public class StorageAnalysisService : IStorageAnalysisService
             _cachedResult = results;
             _lastCacheTime = DateTime.UtcNow;
         }
+
+        foreach (var r in results)
+            _driveCache[r.DriveName.TrimEnd('\\', '/')] = new DriveCacheEntry(r, DateTime.UtcNow);
 
         return results;
     }
@@ -273,37 +321,54 @@ public class StorageAnalysisService : IStorageAnalysisService
             totalUsedBytes = calculatedTotalBytes;
         }
 
-        double totalUsedGb = Math.Round(totalUsedBytes / (1024.0 * 1024 * 1024), 2);
-
         var dtos = allCats
             .Where(c => c.TotalSize > 0 || c.FileCount > 0)
+            .OrderByDescending(c => c.TotalSize)
             .Select(c =>
             {
-                double sizeGb = Math.Round(c.TotalSize / (1024.0 * 1024 * 1024), 2);
                 double pct = totalUsedBytes > 0
                     ? Math.Round((c.TotalSize / (double)totalUsedBytes) * 100, 1)
                     : 0;
                 return new StorageCategoryDto
                 {
                     CategoryName = c.Name,
-                    TotalSizeGb = sizeGb,
+                    TotalSize = FormatSize(c.TotalSize),
                     PercentageOfUsed = pct,
                     ColorClass = c.ColorClass,
                     FileCount = c.FileCount
                 };
             })
-            .OrderByDescending(c => c.TotalSizeGb)
             .ToList();
+
+        double totalBytes = drive.TotalSize;
+        double freeBytes = drive.AvailableFreeSpace;
 
         return new DriveStorageAnalysisDto
         {
             DriveName = drive.Name,
-            TotalSizeGb = Math.Round(drive.TotalSize / (1024.0 * 1024 * 1024), 2),
-            TotalUsedGb = totalUsedGb,
-            FreeSpaceGb = Math.Round(drive.AvailableFreeSpace / (1024.0 * 1024 * 1024), 2),
+            TotalSize = FormatSize(totalBytes),
+            TotalUsed = FormatSize(totalUsedBytes),
+            FreeSpace = FormatSize(freeBytes),
+            UsedPercentage = totalBytes > 0 ? Math.Round(totalUsedBytes / totalBytes * 100, 1) : 0,
+            FreePercentage = totalBytes > 0 ? Math.Round(freeBytes / totalBytes * 100, 1) : 0,
             Categories = dtos,
             LastScanned = DateTime.UtcNow
         };
+    }
+
+    private record DriveCacheEntry(DriveStorageAnalysisDto Data, DateTime Time);
+
+    private static string FormatSize(double bytes)
+    {
+        string[] units = ["B", "KB", "MB", "GB", "TB"];
+        int i = 0;
+        double size = bytes;
+        while (size >= 1024 && i < units.Length - 1)
+        {
+            size /= 1024;
+            i++;
+        }
+        return $"{size:F1} {units[i]}";
     }
 
     private class CategoryAccumulator

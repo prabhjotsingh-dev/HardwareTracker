@@ -23,5 +23,18 @@ project.fragment.lock.json
 .DS_Store
 Thumbs.db
 
+# opencode
+opencode.json
+.agents/
+
+# Next.js
+.next/
+
+# Node.js
+node_modules/
+
+# Local environment files
+.env*.local
+
 # MCP / Testing Tool Output
 .mcp-output/

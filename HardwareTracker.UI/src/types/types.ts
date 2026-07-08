@@ -26,16 +26,18 @@ export interface DriveInfoDto {
 
 export interface DriveStorageAnalysisDto {
   driveName: string
-  totalSizeGb: number
-  totalUsedGb: number
-  freeSpaceGb: number
+  totalSize: string
+  totalUsed: string
+  freeSpace: string
+  usedPercentage: number
+  freePercentage: number
   categories: StorageCategoryDto[]
   lastScanned: string
 }
 
 export interface StorageCategoryDto {
   categoryName: string
-  totalSizeGb: number
+  totalSize: string
   percentageOfUsed: number
   colorClass: string
   fileCount: number

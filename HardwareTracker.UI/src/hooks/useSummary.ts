@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { fetchSummary } from '@/services/api'
-import type { SystemHealthSummary } from '@/types'
+import type { SystemHealthSummary } from '@/types/types'
 
 export function useSummary() {
   const [data, setData] = useState<SystemHealthSummary | null>(null)
