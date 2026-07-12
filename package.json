@@ -1,0 +1,12 @@
+{
+  "name": "hardware-tracker",
+  "private": true,
+  "version": "1.0.0",
+  "description": "HardwareTracker Solution — Root NPM scripts for building UI and starting production/development",
+  "scripts": {
+    "build": "npm --prefix HardwareTracker.UI run build",
+    "dev": "dotnet run --project HardwareTracker.Host -- --dev",
+    "prod": "npm --prefix HardwareTracker.UI run build && dotnet run --project HardwareTracker.Host",
+    "start": "npm --prefix HardwareTracker.UI run build && dotnet run --project HardwareTracker.Host"
+  }
+}

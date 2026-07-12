@@ -29,6 +29,10 @@ opencode.json
 
 # Next.js
 .next/
+out/
+
+# Static UI build output
+HardwareTracker.Host/wwwroot/
 
 # Node.js
 node_modules/

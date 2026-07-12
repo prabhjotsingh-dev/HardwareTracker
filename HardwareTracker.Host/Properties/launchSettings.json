@@ -1,22 +1,22 @@
 {
   "$schema": "https://json.schemastore.org/launchsettings.json",
   "profiles": {
-    "http": {
+    "Production": {
       "commandName": "Project",
       "dotnetRunMessages": true,
-      "launchBrowser": true,
-      "launchUrl": "http://localhost:3000",
-      "applicationUrl": "http://localhost:3000",
+      "launchBrowser": false,
+      "applicationUrl": "http://localhost:5000",
       "environmentVariables": {
-        "ASPNETCORE_ENVIRONMENT": "Development"
+        "ASPNETCORE_ENVIRONMENT": "Production"
       }
     },
-    "https": {
+    "Development": {
       "commandName": "Project",
       "dotnetRunMessages": true,
       "launchBrowser": true,
       "launchUrl": "http://localhost:3000",
-      "applicationUrl": "https://localhost:7236;http://localhost:3000",
+      "applicationUrl": "http://localhost:5000",
+      "commandLineArgs": "--dev",
       "environmentVariables": {
         "ASPNETCORE_ENVIRONMENT": "Development"
       }

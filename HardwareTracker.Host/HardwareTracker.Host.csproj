@@ -4,10 +4,26 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <StaticWebAssetsEnabled>false</StaticWebAssetsEnabled>
+    <DefaultItemExcludes>$(DefaultItemExcludes);wwwroot\**</DefaultItemExcludes>
+    <RazorCompileOnBuild>false</RazorCompileOnBuild>
+    <RazorCompileOnPublish>false</RazorCompileOnPublish>
   </PropertyGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\HardwareTracker.UI\HardwareTracker.UI.csproj" />
     <ProjectReference Include="..\HardwareTracker.Api\HardwareTracker.Api.csproj" />
   </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Photino.NET" Version="4.0.16" />
+  </ItemGroup>
+
+  <Target Name="CopyWwwRootToOutput" AfterTargets="Build">
+    <ItemGroup>
+      <WwwRootFiles Include="wwwroot\**\*.*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(WwwRootFiles)" DestinationFolder="$(OutDir)wwwroot\%(RecursiveDir)" SkipUnchangedFiles="true" />
+  </Target>
 
 </Project>

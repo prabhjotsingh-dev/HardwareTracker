@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <DisableFastUpToDateCheck>true</DisableFastUpToDateCheck>
+  </PropertyGroup>
+
+  <Target Name="NpmInstall" BeforeTargets="Build" Condition="!Exists('$(MSBuildProjectDirectory)\node_modules\.bin\next.cmd') AND !Exists('$(MSBuildProjectDirectory)\node_modules\.bin\next')">
+    <Message Text="Installing npm dependencies..." Importance="high" />
+    <Exec Command="npm install" WorkingDirectory="$(MSBuildProjectDirectory)" />
+  </Target>
+
+  <Target Name="NpmBuild" BeforeTargets="Build">
+    <Message Text="Building Next.js UI..." Importance="high" />
+    <Exec Command="npm run build" WorkingDirectory="$(MSBuildProjectDirectory)" />
+  </Target>
+
+  <Target Name="CopyExport" AfterTargets="NpmBuild">
+    <RemoveDir Directories="$(MSBuildProjectDirectory)\..\HardwareTracker.Host\wwwroot" />
+    <ItemGroup>
+      <ExportFiles Include="$(MSBuildProjectDirectory)\out\**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(ExportFiles)" DestinationFiles="$(MSBuildProjectDirectory)\..\HardwareTracker.Host\wwwroot\%(RecursiveDir)%(Filename)%(Extension)" />
+    <Message Text="UI build complete — copied to HardwareTracker.Host\wwwroot" Importance="high" />
+  </Target>
+
+  <Target Name="CleanNpm" AfterTargets="Clean">
+    <RemoveDir Directories="$(MSBuildProjectDirectory)\node_modules;$(MSBuildProjectDirectory)\.next;$(MSBuildProjectDirectory)\out" />
+  </Target>
+
+</Project>

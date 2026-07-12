@@ -10,6 +10,10 @@ public class HardwareService : IHardwareService
     private readonly ILogger<HardwareService> _logger;
     private readonly IConfiguration _configuration;
 
+    private static SystemHealthSummary? _cachedSummary;
+    private static DateTime _lastSummaryTime = DateTime.MinValue;
+    private static readonly object _summaryLock = new();
+
     public HardwareService(ILogger<HardwareService> logger, IConfiguration configuration)
     {
         _hardwareInfo = new HardwareInfo();
@@ -19,6 +23,14 @@ public class HardwareService : IHardwareService
 
     public Task<SystemHealthSummary> GetSystemHealthSummaryAsync()
     {
+        lock (_summaryLock)
+        {
+            if (_cachedSummary != null && (DateTime.UtcNow - _lastSummaryTime).TotalSeconds < 3)
+            {
+                return Task.FromResult(_cachedSummary);
+            }
+        }
+
         return Task.Run(() =>
         {
             try
@@ -112,6 +124,12 @@ public class HardwareService : IHardwareService
                 OverallHealth = health,
                 StatusMessage = statusMsg
             };
+
+            lock (_summaryLock)
+            {
+                _cachedSummary = summary;
+                _lastSummaryTime = DateTime.UtcNow;
+            }
 
             return summary;
         });

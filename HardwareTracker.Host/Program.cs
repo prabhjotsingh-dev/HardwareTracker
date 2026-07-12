@@ -1,66 +1,130 @@
 using System.Diagnostics;
 using System.Net.NetworkInformation;
-using System.Linq;
+using HardwareTracker.Api.Services;
+using Microsoft.AspNetCore.Hosting.Server;
+using Microsoft.AspNetCore.Hosting.Server.Features;
+using Photino.NET;
 
-var apiArgs = new[] { "--urls", "http://localhost:5181;https://localhost:7236" };
+namespace HardwareTracker.Host;
 
-using var apiApp = HardwareTracker.Api.Startup.CreateApp(apiArgs);
-FreePort(3000);
-using var uiProcess = StartNextJs();
-
-var lifetime = new HostLifetime(uiProcess);
-Console.CancelKeyPress += (_, e) =>
+internal static class Program
 {
-    e.Cancel = true;
-    lifetime.Shutdown();
-};
-
-AppDomain.CurrentDomain.ProcessExit += (_, _) => lifetime.Dispose();
-
-BuildUI();
-
-await Task.WhenAll(apiApp.RunAsync(), lifetime.WaitForExitAsync());
-
-static void BuildUI()
-{
-    var uiDir = ResolveProjectPath("HardwareTracker.UI");
-    if (uiDir is null)
+    [STAThread]
+    public static void Main(string[] args)
     {
-        Console.WriteLine("UI project not found. Skipping UI build.");
-        return;
+        MainAsync(args).GetAwaiter().GetResult();
     }
 
-    var outDir = Path.Combine(uiDir, ".next");
-    if (Directory.Exists(outDir))
-        return;
-
-    Console.WriteLine("Building UI...");
-    var psi = new ProcessStartInfo("cmd.exe", $"/c cd /d \"{uiDir}\" && npm run build")
+    private static async Task MainAsync(string[] args)
     {
-        UseShellExecute = false,
-        RedirectStandardOutput = true,
-        RedirectStandardError = true
-    };
-    using var process = Process.Start(psi)!;
-    process.WaitForExit();
+        var wwwroot = ResolveWwwRootPath();
 
-    if (process.ExitCode == 0)
-        Console.WriteLine("UI build complete.");
-    else
-        Console.Error.WriteLine("UI build failed.");
-}
+        if (args.Contains("--dev"))
+        {
+            var apiArgs = new[] { "--urls", "http://localhost:5181;https://localhost:7236" };
+            using var apiApp = HardwareTracker.Api.Startup.CreateApp(apiArgs);
+            FreePort(3000);
+            using var uiProcess = StartNextJsDev();
 
-static Process StartNextJs()
+            var lifetime = new HostLifetime(uiProcess);
+            Console.CancelKeyPress += (_, e) =>
+            {
+                e.Cancel = true;
+                lifetime.Shutdown();
+            };
+            AppDomain.CurrentDomain.ProcessExit += (_, _) => lifetime.Dispose();
+
+            await Task.WhenAll(apiApp.RunAsync(), lifetime.WaitForExitAsync());
+        }
+        else
+        {
+            var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+            {
+                Args = args,
+                WebRootPath = wwwroot
+            });
+
+            builder.Services.AddSingleton<IHardwareService, HardwareService>();
+            builder.Services.AddSingleton<IStorageAnalysisService, StorageAnalysisService>();
+            builder.Services.AddControllers()
+                .AddApplicationPart(typeof(HardwareTracker.Api.Startup).Assembly);
+
+            var app = builder.Build();
+
+            app.UseDefaultFiles();
+            app.UseStaticFiles(new StaticFileOptions
+            {
+                OnPrepareResponse = ctx =>
+                {
+                    if (ctx.File.Name.EndsWith(".html", StringComparison.OrdinalIgnoreCase))
+                    {
+                        ctx.Context.Response.Headers.Append("Cache-Control", "no-cache, no-store, must-revalidate");
+                        ctx.Context.Response.Headers.Append("Pragma", "no-cache");
+                        ctx.Context.Response.Headers.Append("Expires", "0");
+                    }
+                }
+            });
+            app.MapControllers();
+            app.MapFallbackToFile("index.html");
+
+            using var shutdownCts = new CancellationTokenSource();
+            await app.StartAsync(shutdownCts.Token);
+
+            var serverAddresses = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()?.Addresses;
+            var serverUrl = serverAddresses?.FirstOrDefault() ?? "http://localhost:5000";
+
+            Console.WriteLine($"HardwareTracker running at {serverUrl} — serving from {wwwroot}");
+
+            // Native desktop window via Photino.NET (OS-native WebView2 / WebKit)
+            new PhotinoWindow()
+                .SetTitle("HardwareTracker")
+                .SetUseOsDefaultSize(false)
+                .SetSize(1200, 800)
+                .Center()
+                .Load(serverUrl)
+                .WaitForClose();
+
+            // Window closed — shut down the server
+            await app.StopAsync();
+        }
+    }
+
+    private static string ResolveWwwRootPath()
+    {
+        // 1. Current working directory wwwroot
+        var cwdWwwRoot = Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), "wwwroot"));
+        if (Directory.Exists(cwdWwwRoot) && File.Exists(Path.Combine(cwdWwwRoot, "index.html")))
+            return cwdWwwRoot;
+
+        // 2. HardwareTracker.Host project wwwroot (for execution from solution root directory)
+        var hostDir = ResolveProjectPath("HardwareTracker.Host");
+        if (hostDir is not null)
+        {
+            var hostWwwRoot = Path.GetFullPath(Path.Combine(hostDir, "wwwroot"));
+            if (Directory.Exists(hostWwwRoot) && File.Exists(Path.Combine(hostWwwRoot, "index.html")))
+                return hostWwwRoot;
+        }
+
+        // 3. Base directory wwwroot (for execution from bin folder or published binary)
+        var baseWwwRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "wwwroot"));
+        if (Directory.Exists(baseWwwRoot) && File.Exists(Path.Combine(baseWwwRoot, "index.html")))
+            return baseWwwRoot;
+
+        // 4. Fallback to cwdWwwRoot
+        return cwdWwwRoot;
+    }
+
+static Process StartNextJsDev()
 {
     var uiDir = ResolveProjectPath("HardwareTracker.UI");
     if (uiDir is null)
     {
-        Console.WriteLine("UI project not found. Cannot start Next.js.");
+        Console.WriteLine("UI project not found.");
         Environment.Exit(1);
     }
 
-    Console.WriteLine("Starting Next.js server...");
-    var psi = new ProcessStartInfo("cmd.exe", $"/c cd /d \"{uiDir}\" && npx next start -p 3000")
+    Console.WriteLine("Starting Next.js dev server...");
+    var psi = new ProcessStartInfo("cmd.exe", $"/c cd /d \"{uiDir}\" && npm run dev")
     {
         UseShellExecute = false,
         RedirectStandardOutput = true,
@@ -137,7 +201,7 @@ static int? GetProcessIdOnPort(int port)
 
         foreach (var line in output.Split('\n'))
         {
-            if (line.Contains($"LISTENING") && line.Contains($":{port} "))
+            if (line.Contains("LISTENING") && line.Contains($":{port} "))
             {
                 var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
                 if (parts.Length >= 5 && int.TryParse(parts[^1], out var pid))
@@ -183,3 +247,5 @@ sealed class HostLifetime(Process _uiProcess) : IDisposable
         Console.WriteLine("Shutdown complete.");
     }
 }
+}
+

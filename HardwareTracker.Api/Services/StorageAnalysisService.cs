@@ -26,7 +26,7 @@ public class StorageAnalysisService : IStorageAnalysisService
     public StorageAnalysisService(ILogger<StorageAnalysisService> logger, IConfiguration configuration)
     {
         _logger = logger;
-        _cacheDuration = TimeSpan.FromSeconds(configuration.GetValue("StorageAnalysis:CacheDurationSeconds", 60));
+        _cacheDuration = TimeSpan.FromSeconds(configuration.GetValue("StorageAnalysis:CacheDurationSeconds", 300));
         _scanTimeout = TimeSpan.FromSeconds(configuration.GetValue("StorageAnalysis:ScanTimeoutSeconds", 45));
     }
 
@@ -133,20 +133,20 @@ public class StorageAnalysisService : IStorageAnalysisService
         }
         catch { }
 
-        var catSystem = new CategoryAccumulator("System", "cat-system");
-        var catApps = new CategoryAccumulator("Applications", "cat-applications");
-        var catAppData = new CategoryAccumulator("AppData", "cat-appdata");
-        var catDocuments = new CategoryAccumulator("Documents", "cat-documents");
-        var catMusic = new CategoryAccumulator("Music", "cat-music");
-        var catVideos = new CategoryAccumulator("Videos", "cat-videos");
-        var catPictures = new CategoryAccumulator("Pictures", "cat-pictures");
-        var catDownloads = new CategoryAccumulator("Downloads", "cat-downloads");
-        var catDesktop = new CategoryAccumulator("Desktop", "cat-desktop");
-        var catOther = new CategoryAccumulator("Other", "cat-other");
+        var catSystem = new CategoryAccumulator("System Files", "bg-red-500");
+        var catApps = new CategoryAccumulator("Applications", "bg-blue-500");
+        var catAppData = new CategoryAccumulator("AppData", "bg-indigo-500");
+        var catDocuments = new CategoryAccumulator("Documents", "bg-green-500");
+        var catMusic = new CategoryAccumulator("Music", "bg-yellow-500");
+        var catVideos = new CategoryAccumulator("Videos", "bg-purple-500");
+        var catPictures = new CategoryAccumulator("Pictures", "bg-pink-500");
+        var catDownloads = new CategoryAccumulator("Downloads", "bg-orange-500");
+        var catDesktop = new CategoryAccumulator("Desktop", "bg-teal-500");
+        var catOther = new CategoryAccumulator("Other", "bg-gray-500");
 
         var categoryByName = new Dictionary<string, CategoryAccumulator>(StringComparer.OrdinalIgnoreCase)
         {
-            ["System"] = catSystem,
+            ["System Files"] = catSystem,
             ["Applications"] = catApps,
             ["AppData"] = catAppData,
             ["Documents"] = catDocuments,
@@ -224,95 +224,144 @@ public class StorageAnalysisService : IStorageAnalysisService
             AddIfOnDrive(Path.Combine(userProfile, "AppData"), catAppData);
         }
 
-        var stack = new Stack<(DirectoryInfo Dir, CategoryAccumulator? InheritedCat)>();
-        stack.Push((drive.RootDirectory, null));
-
-        while (stack.Count > 0)
+        try
         {
-            token.ThrowIfCancellationRequested();
-            var (currentDir, inheritedCat) = stack.Pop();
-
-            if (inheritedCat == null)
+            foreach (var file in drive.RootDirectory.EnumerateFiles("*", _enumOptions))
             {
-                string dirNorm = currentDir.FullName.TrimEnd('\\', '/');
-                if (specialDirs.TryGetValue(dirNorm, out var specialCat))
+                if (token.IsCancellationRequested) break;
+                try
                 {
-                    inheritedCat = specialCat;
-                }
-                else if (currentDir.Parent?.Parent?.Name.Equals("Users", StringComparison.OrdinalIgnoreCase) == true)
-                {
-                    string folderName = currentDir.Name;
-                    if (folderName.Equals("Documents", StringComparison.OrdinalIgnoreCase)) inheritedCat = catDocuments;
-                    else if (folderName.Equals("Music", StringComparison.OrdinalIgnoreCase)) inheritedCat = catMusic;
-                    else if (folderName.Equals("Videos", StringComparison.OrdinalIgnoreCase)) inheritedCat = catVideos;
-                    else if (folderName.Equals("Pictures", StringComparison.OrdinalIgnoreCase)) inheritedCat = catPictures;
-                    else if (folderName.Equals("Downloads", StringComparison.OrdinalIgnoreCase)) inheritedCat = catDownloads;
-                    else if (folderName.Equals("Desktop", StringComparison.OrdinalIgnoreCase)) inheritedCat = catDesktop;
-                    else if (folderName.Equals("AppData", StringComparison.OrdinalIgnoreCase)) inheritedCat = catAppData;
-                }
-                else if (currentDir.Parent == null || string.Equals(currentDir.Parent.FullName.TrimEnd('\\', '/'), rootNorm, StringComparison.OrdinalIgnoreCase))
-                {
-                    string folderName = currentDir.Name;
-                    if (folderName.Equals("Windows", StringComparison.OrdinalIgnoreCase) ||
-                        folderName.Equals("$Recycle.Bin", StringComparison.OrdinalIgnoreCase) ||
-                        folderName.Equals("System Volume Information", StringComparison.OrdinalIgnoreCase) ||
-                        folderName.Equals("Recovery", StringComparison.OrdinalIgnoreCase))
+                    long length = file.Length;
+                    string ext = file.Extension;
+                    if (extensionMap.TryGetValue(ext, out var catName) &&
+                        categoryByName.TryGetValue(catName, out var cat))
                     {
-                        inheritedCat = catSystem;
+                        Interlocked.Add(ref cat.TotalSize, length);
+                        Interlocked.Increment(ref cat.FileCount);
                     }
-                    else if (folderName.Equals("Program Files", StringComparison.OrdinalIgnoreCase) ||
-                             folderName.Equals("Program Files (x86)", StringComparison.OrdinalIgnoreCase) ||
-                             folderName.Equals("ProgramData", StringComparison.OrdinalIgnoreCase))
+                    else
                     {
-                        inheritedCat = catApps;
+                        Interlocked.Add(ref catOther.TotalSize, length);
+                        Interlocked.Increment(ref catOther.FileCount);
                     }
+                }
+                catch { }
+            }
+        }
+        catch { }
+
+        DirectoryInfo[] topDirs = [];
+        try
+        {
+            topDirs = drive.RootDirectory.GetDirectories("*", _enumOptions);
+        }
+        catch { }
+
+        Parallel.ForEach(topDirs, new ParallelOptions
+        {
+            MaxDegreeOfParallelism = Environment.ProcessorCount,
+            CancellationToken = token
+        }, topDir =>
+        {
+            if (token.IsCancellationRequested) return;
+
+            var stack = new Stack<(DirectoryInfo Dir, CategoryAccumulator? InheritedCat)>();
+            CategoryAccumulator? rootInheritedCat = null;
+            string dirNorm = topDir.FullName.TrimEnd('\\', '/');
+            if (specialDirs.TryGetValue(dirNorm, out var specialCat))
+            {
+                rootInheritedCat = specialCat;
+            }
+            else
+            {
+                string folderName = topDir.Name;
+                if (folderName.Equals("Windows", StringComparison.OrdinalIgnoreCase) ||
+                    folderName.Equals("$Recycle.Bin", StringComparison.OrdinalIgnoreCase) ||
+                    folderName.Equals("System Volume Information", StringComparison.OrdinalIgnoreCase) ||
+                    folderName.Equals("Recovery", StringComparison.OrdinalIgnoreCase))
+                {
+                    rootInheritedCat = catSystem;
+                }
+                else if (folderName.Equals("Program Files", StringComparison.OrdinalIgnoreCase) ||
+                         folderName.Equals("Program Files (x86)", StringComparison.OrdinalIgnoreCase) ||
+                         folderName.Equals("ProgramData", StringComparison.OrdinalIgnoreCase))
+                {
+                    rootInheritedCat = catApps;
                 }
             }
 
-            try
+            stack.Push((topDir, rootInheritedCat));
+
+            while (stack.Count > 0)
             {
-                foreach (var file in currentDir.EnumerateFiles("*", _enumOptions))
+                if (token.IsCancellationRequested) break;
+                var (currentDir, inheritedCat) = stack.Pop();
+
+                if (inheritedCat == null)
                 {
-                    token.ThrowIfCancellationRequested();
-                    try
+                    string curNorm = currentDir.FullName.TrimEnd('\\', '/');
+                    if (specialDirs.TryGetValue(curNorm, out var spCat))
                     {
-                        long length = file.Length;
-                        if (inheritedCat != null)
+                        inheritedCat = spCat;
+                    }
+                    else if (currentDir.Parent?.Parent?.Name.Equals("Users", StringComparison.OrdinalIgnoreCase) == true)
+                    {
+                        string folderName = currentDir.Name;
+                        if (folderName.Equals("Documents", StringComparison.OrdinalIgnoreCase)) inheritedCat = catDocuments;
+                        else if (folderName.Equals("Music", StringComparison.OrdinalIgnoreCase)) inheritedCat = catMusic;
+                        else if (folderName.Equals("Videos", StringComparison.OrdinalIgnoreCase)) inheritedCat = catVideos;
+                        else if (folderName.Equals("Pictures", StringComparison.OrdinalIgnoreCase)) inheritedCat = catPictures;
+                        else if (folderName.Equals("Downloads", StringComparison.OrdinalIgnoreCase)) inheritedCat = catDownloads;
+                        else if (folderName.Equals("Desktop", StringComparison.OrdinalIgnoreCase)) inheritedCat = catDesktop;
+                        else if (folderName.Equals("AppData", StringComparison.OrdinalIgnoreCase)) inheritedCat = catAppData;
+                    }
+                }
+
+                try
+                {
+                    foreach (var file in currentDir.EnumerateFiles("*", _enumOptions))
+                    {
+                        if (token.IsCancellationRequested) break;
+                        try
                         {
-                            inheritedCat.TotalSize += length;
-                            inheritedCat.FileCount++;
-                        }
-                        else
-                        {
-                            string ext = file.Extension.ToLowerInvariant();
-                            if (extensionMap.TryGetValue(ext, out var catName) &&
-                                categoryByName.TryGetValue(catName, out var cat))
+                            long length = file.Length;
+                            if (inheritedCat != null)
                             {
-                                cat.TotalSize += length;
-                                cat.FileCount++;
+                                Interlocked.Add(ref inheritedCat.TotalSize, length);
+                                Interlocked.Increment(ref inheritedCat.FileCount);
                             }
                             else
                             {
-                                catOther.TotalSize += length;
-                                catOther.FileCount++;
+                                string ext = file.Extension;
+                                if (extensionMap.TryGetValue(ext, out var catName) &&
+                                    categoryByName.TryGetValue(catName, out var cat))
+                                {
+                                    Interlocked.Add(ref cat.TotalSize, length);
+                                    Interlocked.Increment(ref cat.FileCount);
+                                }
+                                else
+                                {
+                                    Interlocked.Add(ref catOther.TotalSize, length);
+                                    Interlocked.Increment(ref catOther.FileCount);
+                                }
                             }
                         }
+                        catch { }
                     }
-                    catch { }
                 }
-            }
-            catch { }
+                catch { }
 
-            try
-            {
-                foreach (var subDir in currentDir.EnumerateDirectories("*", _enumOptions))
+                try
                 {
-                    token.ThrowIfCancellationRequested();
-                    stack.Push((subDir, inheritedCat));
+                    foreach (var subDir in currentDir.EnumerateDirectories("*", _enumOptions))
+                    {
+                        if (token.IsCancellationRequested) break;
+                        stack.Push((subDir, inheritedCat));
+                    }
                 }
+                catch { }
             }
-            catch { }
-        }
+        });
 
         var allCats = categoryByName.Values.ToArray();
         long calculatedTotalBytes = allCats.Sum(c => c.TotalSize);
@@ -375,8 +424,8 @@ public class StorageAnalysisService : IStorageAnalysisService
     {
         public string Name { get; }
         public string ColorClass { get; }
-        public long TotalSize { get; set; }
-        public long FileCount { get; set; }
+        public long TotalSize;
+        public long FileCount;
 
         public CategoryAccumulator(string name, string colorClass)
         {
